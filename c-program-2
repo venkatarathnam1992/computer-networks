@@ -1,0 +1,76 @@
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
+
+int main (int argc, char **argv) {
+    if (argc < 4) {
+        printf("Error to few arguments.\nUsage: client <ip/host name> <port> <query>\n");
+        exit(1);
+    }
+
+    struct addrinfo *server_addr;
+    struct addrinfo hint;
+    memset(&hint, 0, sizeof(hint));
+
+    hint.ai_family = AF_UNSPEC;
+    hint.ai_socktype = SOCK_DGRAM;
+    hint.ai_protocol = IPPROTO_UDP;
+
+    printf("getting server info\n");
+    /* Heh...ironic */
+    int err = getaddrinfo(argv[1], argv[2], &hint, &server_addr);
+    if (err != 0) {
+        perror("Error while getting server address info");
+        exit(1);
+    }
+
+    int client;
+    /* Iterate over the provided addresses and try to establish a connection */
+    for (struct addrinfo *cur_info = server_addr; cur_info != NULL; cur_info = cur_info->ai_next) {
+        /* Create corresponding socket */
+        client = socket(cur_info->ai_family, cur_info->ai_socktype, cur_info->ai_protocol);
+
+        printf("Trying to establish connection\n");
+        err = connect(client, cur_info->ai_addr, sizeof(*(cur_info->ai_addr)));
+        /* If connection was established leave loop */
+        if (err == 0) break;
+        /* If an error occured notify */
+        if (err == -1) perror("Error while connecting");
+        close(client);
+        /* If the current info was the last one consider connection failed */
+        if (cur_info->ai_next == NULL) {
+            printf("Error could not connect to any service\n");
+            exit(1);
+        }
+
+    }
+    /* Release information as it is no longer needed */
+    freeaddrinfo(server_addr);
+
+    printf("Sending request\n");
+    err = send(client, argv[3], strlen(argv[3]), 0);
+    if (err < 1) {
+        perror("Error while sending request");
+        exit(1);
+    }
+    printf("%d b sent\n", err);
+
+    char buffer[512];
+    int bytes_received = 0;
+
+    printf("receiving answer\n");
+    while ((bytes_received = recv(client, buffer, sizeof(buffer), 0)) != 0) {
+        if (bytes_received == -1) {
+            perror("Error while receiving message from server");
+            break;
+        }
+        fwrite(buffer, bytes_received, 1, stdout);
+    }
+
+    close(client);
+}
